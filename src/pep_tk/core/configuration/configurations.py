@@ -204,6 +204,15 @@ class DatasetPipelineEnvAdaptersGroup:
 
         return res
 
+    def get_existing_ports(self, dataset: VIAMEDataset) -> List[ENV_VARIABLE]:
+        existing_ports = []
+        for name, attributes in self.__config.items():
+            attr = attributes['dataset_attribute']
+            if dataset.get(attr) is not None:
+                existing_ports.append(attr)
+
+        return existing_ports
+
     def to_dict(self):
         return self.__config
 
@@ -238,7 +247,6 @@ class PipelineConfig:
 
     def get_pipeline_dataset_environment(self, dataset: VIAMEDataset, missing_ok=False) -> Dict[ENV_VARIABLE, VALUE]:
         return self.dataset_ports.get_env_ports(dataset, missing_ok)
-
 
     def to_dict(self) -> Dict:
         d = {

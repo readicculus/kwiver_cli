@@ -48,6 +48,8 @@ class JobMeta:
     def __init__(self, root_dir):
         self.root_dir = root_dir
         self.logs_dir = logs_dir(root_dir)
+        self.dataset_meta_dir = meta_dir(root_dir)
+
         self.completed_outputs_dir = completed_outputs_dir(root_dir)
         self.error_outputs_dir = error_outputs_dir(root_dir)
         self.pending_outputs_dir = pending_outputs_dir(root_dir)
@@ -62,9 +64,49 @@ class JobMeta:
         self._ds_store = jsonfile.jsonfile(self.dataset_meta_fp, default_data={}, autosave=True,
                                            dump_kwargs=dump_kwargs)
 
+    def _copy_pipeline_inputs(self, pipeline: PipelineConfig, dataset: VIAMEDataset) -> VIAMEDataset:
+        '''
+            Copies the pipeline inputs to the meta directory
+            :return the new dataset pointing to the copied files
+        '''
+        new_dir = os.path.join(self.dataset_meta_dir, dataset.name)
+        os.makedirs(new_dir, exist_ok=True)
+
+        ports_to_copy = pipeline.dataset_ports.get_existing_ports(dataset)
+        new_outputs = {}
+        for p in ports_to_copy:
+            fp = getattr(dataset, p)
+            original_list_dir = os.path.dirname(fp)
+            fp_new = os.path.join(new_dir, os.path.basename(fp))
+            new_outputs[p] = fp_new
+
+            if new_outputs[p] == fp:
+                continue # already copied and probably this was called when a run is being resumed
+
+            if p in ['thermal_image_list', 'color_image_list']:
+                # if its an image list copy it over and ensure paths are absolute
+                with open(fp, 'r') as f:
+                    with open(fp_new, 'w') as f_new:
+                        for line in f:
+                            line = line.strip()
+                            newline = line
+                            if len(line) > 0 and not os.path.isabs(line):
+                                newline = os.path.normpath(os.path.join(original_list_dir, newline))
+                            f_new.write(newline + '\n')
+            else:
+                # otherwise just copy the file, right now this is only for the h5 file
+                shutil.copy(fp, new_dir)
+
+        self.dataset_meta_dir
+        new_dataset = VIAMEDataset(name=dataset.name, **new_outputs)
+        return new_dataset
+
     def create_meta(self, pipeline: PipelineConfig, datasets: List[VIAMEDataset]):
         self._pipe_store.data = pipeline.to_dict()
-        for idx, dataset in enumerate(datasets):
+        for idx, _dataset in enumerate(datasets):
+            dataset = self._copy_pipeline_inputs(pipeline, _dataset)
+            self._copy_pipeline_inputs(pipeline, dataset)
+
             compiled_fp = os.path.join(self.compiled_pipelines_dir,
                                        f'{dataset.filename_friendly_name}-{pipeline.name}.pipe')
 
@@ -74,6 +116,17 @@ class JobMeta:
                 output_pattern = v['default'].replace('[DATASET]', dataset.filename_friendly_name)
                 output_config[config_name]['_value'] = output_pattern
                 output_config[config_name]['_locked'] = True
+
+            # Copy pipeline inputs to meta directory
+            # dataset_env = {}
+            # for env_name, fp in pipeline.get_pipeline_dataset_environment(dataset).items():
+            #     if fp[-4:] != ".txt":
+            #         dataset_env[env_name] = fp
+            #         continue
+            #     fn = os.path.basename(fp)
+            #     path = os.path.dirname(pipeline.get_pipeline_dataset_environment(dataset)['PIPE_ARG_THERMAL_INPUT'])
+            #     self.dataset_meta_dir,
+
 
             # compile everything EXCEPT the new outputs
             env = {**pipeline.get_parameter_env_ports(),
